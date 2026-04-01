@@ -6,7 +6,7 @@ use std::io::{self, BufRead, BufReader, Read, Write, stderr, stdout};
 use std::{array, collections::HashMap, hash::Hash, ops::DerefMut, thread::sleep, time::{Duration, Instant}};
 use std::path::{Path, PathBuf};
 use std::env;
-use crossterm::cursor::{MoveLeft, MoveToColumn};
+use crossterm::cursor::{MoveDown, MoveLeft, MoveToColumn};
 use crossterm::style::{StyledContent, Stylize};
 use crossterm::{
     execute, queue,
@@ -125,7 +125,6 @@ impl Terminal for Bash {
             }
         }
         let status = proc.wait().expect("failed to wait on child");
-        self.enter();
     }
     fn build_prefix(&mut self) -> String {
         let path = Path::new(self.path.as_str());
@@ -176,8 +175,8 @@ impl Terminal for Bash {
                 self.cmdbuff.push(c);
             },
             TerminalEvent::Enter => {
-                let curpos = position().unwrap();
-                queue!(io::stdout(), MoveTo(0, curpos.1+1));
+                self.write("\n");
+                queue!(io::stdout(), MoveToColumn(0));
                 let cmd = self.cmdbuff.clone();
                 self.cmdbuff.clear();
                 if !cmd.trim().is_empty() {
