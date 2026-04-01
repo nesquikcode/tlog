@@ -124,8 +124,8 @@ impl Terminal for Bash {
                 Err(l) => {}
             }
         }
-
         let status = proc.wait().expect("failed to wait on child");
+        self.enter();
     }
     fn build_prefix(&mut self) -> String {
         let path = Path::new(self.path.as_str());
