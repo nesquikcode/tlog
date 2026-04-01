@@ -73,7 +73,7 @@ impl Terminal for Bash {
         self.path = String::from(env::current_dir().unwrap_or_else(|x| PathBuf::new()).to_str().unwrap_or_else(|| ""));
     }
     fn execute(&mut self, command: &str) {
-        let mut proc = Command::new(if cfg!(windows) { "cmd.exe" } else { "/bin/bash" })
+        let mut proc = Command::new(if cfg!(windows) { "cmd.exe" } else { "bash" })
             .args(if cfg!(windows) {
                 vec!["/C", command]
             } else {
