@@ -176,7 +176,8 @@ impl Terminal for Bash {
                 self.cmdbuff.push(c);
             },
             TerminalEvent::Enter => {
-                queue!(io::stdout(), Print("\n"), MoveToColumn(0));
+                let curpos = position().unwrap();
+                queue!(io::stdout(), MoveTo(0, curpos.1+1));
                 let cmd = self.cmdbuff.clone();
                 self.cmdbuff.clear();
                 if !cmd.trim().is_empty() {
