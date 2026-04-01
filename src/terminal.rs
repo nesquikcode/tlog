@@ -1,11 +1,12 @@
+use std::sync::{Arc, Mutex};
 use std::any::Any;
-use std::thread::{spawn};
-use std::process::{Command, Stdio, exit};
-use std::io::{Write, Read, self};
+use std::thread::{self, spawn};
+use std::process::{ChildStderr, ChildStdout, Command, Stdio, exit};
+use std::io::{self, BufRead, BufReader, Read, Write, stderr, stdout};
 use std::{array, collections::HashMap, hash::Hash, ops::DerefMut, thread::sleep, time::{Duration, Instant}};
 use std::path::{Path, PathBuf};
 use std::env;
-use crossterm::cursor::MoveLeft;
+use crossterm::cursor::{MoveLeft, MoveToColumn};
 use crossterm::style::{StyledContent, Stylize};
 use crossterm::{
     execute, queue,
@@ -27,6 +28,7 @@ pub enum TerminalEvent {
 
 pub trait Terminal {
     fn build_prefix(&mut self) -> String;
+    fn update_path(&mut self);
     fn emit(&mut self, ev: TerminalEvent);
     fn get_event(&mut self);
     fn write(&self, content: &str);
@@ -35,6 +37,7 @@ pub trait Terminal {
     fn add(&mut self, content: &str) {
         for c in content.chars() {self.emit(TerminalEvent::Char { c });}
     }
+    fn execute(&mut self, command: &str);
     fn enter(&mut self) {self.emit(TerminalEvent::Enter);}
     fn backspace(&mut self) {self.emit(TerminalEvent::Backspace);}
     fn run(&mut self);
@@ -42,14 +45,16 @@ pub trait Terminal {
 
 pub struct Bash {
     pub path: String,
-    pub input_time: f32
+    pub input_time: f32,
+    pub cmdbuff: String
 }
 
 impl Bash {
     pub fn new(path: String) -> Bash {
         Bash {
             path: path,
-            input_time: 0.0001
+            input_time: 0.0001,
+            cmdbuff: String::new()
         }
     }
     fn format_prefix(&mut self) -> String {
@@ -64,6 +69,64 @@ impl Terminal for Bash {
     fn writenflush(&self, content: &str) {self.write(content);self.flush();}
     fn write(&self, content: &str) {io::stdout().write_all(content.as_bytes());}
     fn flush(&self) {io::stdout().flush();}
+    fn update_path(&mut self) {
+        self.path = String::from(env::current_dir().unwrap_or_else(|x| PathBuf::new()).to_str().unwrap_or_else(|| ""));
+    }
+    fn execute(&mut self, command: &str) {
+        let mut proc = Command::new(if cfg!(windows) { "cmd.exe" } else { "/bin/bash" })
+            .args(if cfg!(windows) {
+                vec!["/C", command]
+            } else {
+                vec!["-c", command]
+            })
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = proc.stdout.take().expect("oops!");
+        let stderr = proc.stderr.take().expect("oops!");
+        let outreader = BufReader::new(stdout);
+        let errreader = BufReader::new(stderr);
+        
+        let mut hasout_err = Arc::new(Mutex::new(false));
+        let mut hasout_out = hasout_err.clone();
+        thread::spawn(move || {
+            for line in errreader.lines() {
+                match line {
+                    Ok(l) => {
+                        if !*hasout_err.lock().unwrap() {
+                            io::stdout().write(b"\n");
+                            io::stdout().write(l.as_bytes());
+                            io::stdout().flush();
+                            *hasout_err.lock().unwrap() = true;
+                        } else {
+                            io::stdout().write(l.as_bytes());
+                            io::stdout().flush();
+                        }
+                    }
+                    Err(l) => {}
+                }
+            }
+        });
+
+        for line in outreader.lines() {
+            match line {
+                Ok(l) => {
+                    if !*hasout_out.lock().unwrap() {
+                        self.write("\n");
+                        self.writenflush(l.as_str());
+                        *hasout_out.lock().unwrap() = true;
+                    } else {
+                        self.writenflush(l.as_str());
+                    }
+                }
+                Err(l) => {}
+            }
+        }
+
+        let status = proc.wait().expect("failed to wait on child");
+    }
     fn build_prefix(&mut self) -> String {
         let path = Path::new(self.path.as_str());
         let home = env::var("HOME")
@@ -110,8 +173,15 @@ impl Terminal for Bash {
         match ev {
             TerminalEvent::Char { c } => {
                 self.writenflush(&c.to_string());
+                self.cmdbuff.push(c);
             },
             TerminalEvent::Enter => {
+                queue!(io::stdout(), MoveToColumn(0));
+                let cmd = self.cmdbuff.clone();
+                self.cmdbuff.clear();
+                if !cmd.trim().is_empty() {
+                    self.execute(&cmd.as_str());
+                }
                 let prefix = "\n".to_string() + self.format_prefix().as_str();
                 self.writenflush(&prefix.as_str());
             }
@@ -174,7 +244,7 @@ impl Terminal for Bash {
         }
     }
     fn run(&mut self) {
-        self.path = String::from(env::current_dir().unwrap_or_else(|x| PathBuf::new()).to_str().unwrap_or_else(|| ""));
+        self.update_path();
 
         enable_raw_mode().unwrap();
         let prefix = "\n".to_string() + self.format_prefix().as_str();
