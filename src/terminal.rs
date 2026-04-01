@@ -176,14 +176,14 @@ impl Terminal for Bash {
                 self.cmdbuff.push(c);
             },
             TerminalEvent::Enter => {
-                queue!(io::stdout(), MoveToColumn(0));
+                queue!(io::stdout(), Print("\n"), MoveToColumn(0));
                 let cmd = self.cmdbuff.clone();
                 self.cmdbuff.clear();
                 if !cmd.trim().is_empty() {
                     self.execute(&cmd.as_str());
                 }
-                let prefix = "\n".to_string() + self.format_prefix().as_str();
-                self.writenflush(&prefix.as_str());
+                let prefix = self.format_prefix();
+                self.writenflush(prefix.as_str());
             }
             TerminalEvent::Backspace => {
                 let prefix = self.build_prefix();
@@ -218,6 +218,7 @@ impl Terminal for Bash {
                                                 self.emit(TerminalEvent::Enter);
                                             }
                                             _ => {
+                                                disable_raw_mode();
                                                 exit(0);
                                             }
                                         }
@@ -251,6 +252,7 @@ impl Terminal for Bash {
         self.writenflush(&prefix.as_str());
         loop {
             self.get_event();
+            self.update_path();
         }
     }
 }
